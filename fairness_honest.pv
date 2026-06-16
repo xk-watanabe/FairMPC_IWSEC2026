@@ -1,0 +1,211 @@
+free c: channel.
+free P1_P2: channel.
+free P1_P3: channel.
+free P2_P3: channel.
+
+(* Digital Signature *)
+type skey.
+type pkey.
+fun pk(skey): pkey.
+fun sign(bitstring, skey): bitstring.
+fun checksign(bitstring, bitstring, pkey): bool
+reduc forall m: bitstring, k: skey; checksign(m, sign(m, k), pk(k)) = true
+otherwise forall m: bitstring, s: bitstring, y: pkey; checksign(m, s, y) = false.
+
+(* secret sharing *)
+type unshare.
+type share.
+type coins.
+fun share1(unshare, coins): share.
+fun share2(unshare, coins): share.
+fun share3(unshare, coins): share.
+letfun secretsharing(s:unshare) =
+    new r: coins;
+    (share1(s,r), share2(s,r), share3(s,r)).
+
+(* Commitment *)
+fun commit(share, coins): bitstring.
+reduc forall x:share, r:coins; decommit(commit(x,r), r) = x.
+
+(* Party IDs *)
+type identifier.
+const p1, p2, p3, null: identifier.
+
+(* Contract *)
+const exit: bitstring.
+table contract(bitstring, bitstring, bitstring, bitstring).
+table contract_exit(bitstring, bitstring).
+
+(* Events *)
+event send_share_p1(bitstring).
+event send_share_p2(bitstring).
+event send_share_p3(bitstring).
+event ver_success_without_penalty(bitstring, identifier).
+event ver_success_with_penalty(bitstring, identifier).
+event ver_confiscation(bitstring, identifier).
+
+(* Queries *)
+query id:bitstring; event(ver_success_without_penalty(id, p1)).
+query id:bitstring; event(ver_success_without_penalty(id, p2)).
+query id:bitstring; event(ver_success_without_penalty(id, p3)).
+query id:bitstring; event(ver_success_with_penalty(id, p1)).
+query id:bitstring; event(ver_success_with_penalty(id, p2)).
+query id:bitstring; event(ver_success_with_penalty(id, p3)).
+query id:bitstring; event(ver_confiscation(id, p1)).
+query id:bitstring; event(ver_confiscation(id, p2)).
+query id:bitstring; event(ver_confiscation(id, p3)).
+query id:bitstring; inj-event(ver_success_without_penalty(id, p1)) ==> inj-event(send_share_p1(id)).
+query id:bitstring; inj-event(ver_success_without_penalty(id, p2)) ==> inj-event(send_share_p2(id)).
+query id:bitstring; inj-event(ver_success_without_penalty(id, p3)) ==> inj-event(send_share_p3(id)).
+query id:bitstring; inj-event(ver_success_with_penalty(id, p1)) ==> inj-event(send_share_p1(id)).
+query id:bitstring; inj-event(ver_success_with_penalty(id, p2)) ==> inj-event(send_share_p2(id)).
+query id:bitstring; inj-event(ver_success_with_penalty(id, p3)) ==> inj-event(send_share_p3(id)).
+query id:bitstring; event(ver_success_without_penalty(id, p1)) && event(ver_success_with_penalty(id, p1)).
+query id:bitstring; event(ver_success_without_penalty(id, p1)) && event(ver_confiscation(id, p1)).
+query id:bitstring; event(ver_success_with_penalty(id, p1)) && event(ver_confiscation(id, p1)).
+query id:bitstring; event(ver_success_without_penalty(id, p2)) && event(ver_success_with_penalty(id, p2)).
+query id:bitstring; event(ver_success_without_penalty(id, p2)) && event(ver_confiscation(id, p2)).
+query id:bitstring; event(ver_success_with_penalty(id, p2)) && event(ver_confiscation(id, p2)).
+query id:bitstring; event(ver_success_without_penalty(id, p3)) && event(ver_success_with_penalty(id, p3)).
+query id:bitstring; event(ver_success_without_penalty(id, p3)) && event(ver_confiscation(id, p3)).
+query id:bitstring; event(ver_success_with_penalty(id, p3)) && event(ver_confiscation(id, p3)).
+query id:bitstring; event(ver_success_without_penalty(id, p1)) && event(ver_success_with_penalty(id, p2)).
+query id:bitstring; event(ver_success_without_penalty(id, p2)) && event(ver_success_with_penalty(id, p3)).
+query id:bitstring; event(ver_success_without_penalty(id, p3)) && event(ver_success_with_penalty(id, p1)).
+query id:bitstring; event(ver_success_without_penalty(id, p1)) && event(ver_confiscation(id, p3)).
+query id:bitstring; event(ver_success_without_penalty(id, p2)) && event(ver_confiscation(id, p1)).
+query id:bitstring; event(ver_success_without_penalty(id, p3)) && event(ver_confiscation(id, p2)).
+query id:bitstring; event(ver_success_with_penalty(id, p1)) && event(ver_success_with_penalty(id, p2)) && event(ver_success_with_penalty(id, p3)).
+
+(* Secure Function Evaluation *)
+fun FE(unshare, unshare, unshare): unshare.
+table SFE_table(bitstring, identifier, share, bitstring, coins).
+let SFE(id:bitstring, x1:unshare, x2:unshare, x3:unshare)=
+    let (sh1:share, sh2:share, sh3:share) = secretsharing(FE(x1, x2, x3)) in
+    new d1: coins;
+    let c1 = commit(sh1, d1) in
+    new d2: coins;
+    let c2 = commit(sh2, d2) in
+    new d3: coins;
+    let c3 = commit(sh3, d3) in
+    insert SFE_table(id, p1, sh1, (c1, c2, c3), d1);
+    insert SFE_table(id, p2, sh2, (c1, c2, c3), d2);
+    insert SFE_table(id, p3, sh3, (c1, c2, c3), d3)
+.
+
+letfun Contract_Ver(id:bitstring, px':identifier, com:bitstring, sigma:bitstring, pk_x:pkey) =
+    if px' <> null then checksign((id, com), sigma, pk_x) else false.
+
+let Contract_Back_Penalty(flag:bool, id:bitstring, px:identifier)=
+    if flag then
+    event ver_success_with_penalty(id, px)
+    else
+    event ver_confiscation(id, px)
+.
+
+(* Smart Contract *)
+let Contract(id:bitstring, pk_1:pkey, pk_2:pkey, pk_3:pkey)=
+    get contract(=id, (p1':identifier, p2':identifier, p3':identifier), (c1:bitstring, c2:bitstring, c3:bitstring), (sigma1:bitstring, sigma2:bitstring, sigma3:bitstring)) in
+    let flag_p1 = Contract_Ver(id, p1', (c1, c2, c3), sigma1, pk_1) in
+    let flag_p2 = Contract_Ver(id, p2', (c1, c2, c3), sigma2, pk_2) in
+    let flag_p3 = Contract_Ver(id, p3', (c1, c2, c3), sigma3, pk_3) in
+    get contract_exit(=id, =exit) in
+    if flag_p1 && flag_p2 && flag_p3 then
+    (
+        event ver_success_without_penalty(id, p1);
+        event ver_success_without_penalty(id, p2);
+        event ver_success_without_penalty(id, p3)
+    )
+    else
+    (
+        Contract_Back_Penalty(flag_p1, id, p1)
+        |
+        Contract_Back_Penalty(flag_p2, id, p2)
+        |
+        Contract_Back_Penalty(flag_p3, id, p3)
+    )
+.
+
+let P1(id:bitstring, sk_1:skey, pk_1:pkey, pk_2:pkey, pk_3:pkey, x1:unshare)=
+    get SFE_table(=id, =p1, sh1, (c1: bitstring, c2: bitstring, c3: bitstring), d1) in
+    let sigma1 = sign((id, (c1, c2, c3)), sk_1) in
+    out(P1_P2, sigma1);
+    out(P1_P3, sigma1);
+    in(P1_P2, sigma2:bitstring);
+    in(P1_P3, sigma3:bitstring);
+    if checksign((id, (c1, c2, c3)), sigma2, pk_2) then
+    if checksign((id, (c1, c2, c3)), sigma3, pk_3) then
+    event send_share_p1(id);
+    out(P1_P2, (sh1, d1));
+    out(P1_P3, (sh1, d1));
+    in(P1_P2, (sh2: share, d2: coins));
+    in(P1_P3, (sh3: share, d3: coins));
+    if sh2 = decommit(c2, d2) then
+    if sh3 = decommit(c3, d3) then
+    insert contract(id, (p1, p2, p3), (c1, c2, c3), (sigma1, sigma2, sigma3));
+    insert contract_exit(id, exit)
+.
+
+let P2(id:bitstring, sk_2:skey, pk_1:pkey, pk_2:pkey, pk_3:pkey, x2:unshare)=
+    get SFE_table(=id, =p2, sh2, (c1: bitstring, c2: bitstring, c3: bitstring), d2) in
+    let sigma2 = sign((id, (c1, c2, c3)), sk_2) in
+    out(P1_P2, sigma2);
+    out(P2_P3, sigma2);
+    in(P1_P2, sigma1:bitstring);
+    in(P2_P3, sigma3:bitstring);
+    if checksign((id, (c1, c2, c3)), sigma1, pk_1) then
+    if checksign((id, (c1, c2, c3)), sigma3, pk_3) then
+    event send_share_p2(id);
+    out(P1_P2, (sh2, d2));
+    out(P2_P3, (sh2, d2));
+    in(P1_P2, (sh1: share, d1: coins));
+    in(P2_P3, (sh3: share, d3: coins));
+    if sh1 = decommit(c1, d1) then
+    if sh3 = decommit(c3, d3) then
+    0
+.
+
+let P3(id:bitstring, sk_3:skey, pk_1:pkey, pk_2:pkey, pk_3:pkey, x3:unshare)=
+    get SFE_table(=id, =p3, sh3, (c1: bitstring, c2: bitstring, c3: bitstring), d3) in
+    let sigma3 = sign((id, (c1, c2, c3)), sk_3) in
+    out(P1_P3, sigma3);
+    out(P2_P3, sigma3);
+    in(P1_P3, sigma1:bitstring);
+    in(P2_P3, sigma2:bitstring);
+    if checksign((id, (c1, c2, c3)), sigma1, pk_1) then
+    if checksign((id, (c1, c2, c3)), sigma2, pk_2) then
+    event send_share_p3(id);
+    out(P1_P3, (sh3, d3));
+    out(P2_P3, (sh3, d3));
+    in(P1_P3, (sh1: share, d1: coins));
+    in(P2_P3, (sh2: share, d2: coins));
+    if sh1 = decommit(c1, d1) then
+    if sh2 = decommit(c2, d2) then
+    0
+.
+
+process
+    new sk_1: skey;
+    let pk_1 = pk(sk_1) in
+    out(c, pk_1);
+    new sk_2: skey;
+    let pk_2 = pk(sk_2) in
+    out(c, pk_2);
+    new sk_3: skey;
+    let pk_3 = pk(sk_3) in
+    out(c, pk_3);
+    !(
+        new id: bitstring;
+        new x1: unshare;
+        new x2: unshare;
+        new x3: unshare;
+        SFE(id, x1, x2, x3)
+        |
+        Contract(id, pk_1, pk_2, pk_3)
+        |
+        P1(id, sk_1, pk_1, pk_2, pk_3, x1)
+        |
+        P2(id, sk_2, pk_1, pk_2, pk_3, x2)
+        |
+        P3(id, sk_3, pk_1, pk_2, pk_3, x3)
+    )
